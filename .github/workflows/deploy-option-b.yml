@@ -1,0 +1,119 @@
+name: Deploy Option B - Build in CI, Pull on VPS
+
+on:
+  workflow_dispatch:
+
+concurrency:
+  group: deploy-option-b-production
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+
+    steps:
+      - name: 🛒 Checkout repository
+        uses: actions/checkout@v6
+
+      - name: 🏷️ Prepare deployment names
+        id: meta
+        shell: bash
+        run: |
+          REPO_NAME="${GITHUB_REPOSITORY#*/}"
+          PROJECT_NAME="$(printf '%s' "$REPO_NAME" | tr '[:upper:]' '[:lower:]' | sed 's/[^a-z0-9_-]/-/g')"
+          echo "repo_name=$REPO_NAME" >> "$GITHUB_OUTPUT"
+          echo "project_name=$PROJECT_NAME" >> "$GITHUB_OUTPUT"
+          echo "image_name=ghcr.io/${GITHUB_REPOSITORY,,}" >> "$GITHUB_OUTPUT"
+
+      - name: 🧱 Set up QEMU
+        uses: docker/setup-qemu-action@v4
+
+      - name: 🧱 Set up Docker Buildx
+        uses: docker/setup-buildx-action@v4
+
+      - name: 🔐 Login to GHCR
+        uses: docker/login-action@v4
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: 📦 Build and push image
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          file: ./Dockerfile
+          platforms: linux/amd64,linux/arm64
+          pull: true
+          no-cache: true
+          push: true
+          tags: ${{ steps.meta.outputs.image_name }}:${{ github.sha }}
+          labels: |
+            org.opencontainers.image.source=https://github.com/${{ github.repository }}
+            org.opencontainers.image.revision=${{ github.sha }}
+            io.github.repository=${{ github.repository }}
+
+      - name: 🚀 Deploy on VPS from GHCR
+        uses: appleboy/ssh-action@v1.2.5
+        with:
+          host: ${{ secrets.SSH_HOST }}
+          port: ${{ secrets.SSH_PORT }}
+          username: ${{ secrets.SSH_USERNAME }}
+          key: ${{ secrets.SSH_PRIVATE_KEY }}
+          fingerprint: ${{ secrets.SSH_FINGERPRINT }}
+          script: |
+            set -eu
+
+            APP_DIR="$HOME/${{ steps.meta.outputs.repo_name }}"
+            PROJECT_NAME="${{ steps.meta.outputs.project_name }}"
+            COMPOSE_FILE="$APP_DIR/docker-compose.prod.yml"
+            IMAGE_NAME="${{ steps.meta.outputs.image_name }}"
+            IMAGE_TAG="${{ github.sha }}"
+            FULL_IMAGE="${IMAGE_NAME}:${IMAGE_TAG}"
+            GHCR_USERNAME="${{ secrets.GHCR_USERNAME }}"
+            GHCR_READ_TOKEN="${{ secrets.GHCR_READ_TOKEN }}"
+
+            mkdir -p "$APP_DIR/logs"
+            cd "$APP_DIR"
+
+            if [ -n "$GHCR_USERNAME" ] && [ -n "$GHCR_READ_TOKEN" ]; then
+              echo "$GHCR_READ_TOKEN" | docker login ghcr.io -u "$GHCR_USERNAME" --password-stdin
+            fi
+
+            cat > "$COMPOSE_FILE" <<EOF
+            services:
+              app:
+                container_name: ${PROJECT_NAME}-app
+                image: ${FULL_IMAGE}
+                ports:
+                  - "5002:3000"
+                environment:
+                  NODE_ENV: production
+                restart: unless-stopped
+                logging:
+                  driver: json-file
+                  options:
+                    max-size: "10m"
+                    max-file: "3"
+                volumes:
+                  - ./logs:/app/logs
+            EOF
+
+            OLD_IMAGE_IDS="$(docker image ls "$IMAGE_NAME" --format '{{.ID}}' | sort -u)"
+
+            docker compose -p "$PROJECT_NAME" -f "$COMPOSE_FILE" down --remove-orphans || true
+
+            if [ -n "$OLD_IMAGE_IDS" ]; then
+              echo "$OLD_IMAGE_IDS" | xargs -r docker image rm -f || true
+            fi
+
+            docker pull "$FULL_IMAGE"
+
+            docker compose -p "$PROJECT_NAME" -f "$COMPOSE_FILE" up -d --force-recreate
+
+            docker image prune -f --filter "label=io.github.repository=${{ github.repository }}"
+
+            docker compose -p "$PROJECT_NAME" -f "$COMPOSE_FILE" ps
