@@ -8,7 +8,7 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Test SSH connection
+      - name: Test SSH connection ${{ vars.SSH_HOST }} ${{ vars.SSH_PORT }} ${{ vars.SSH_USERNAME }}
         uses: appleboy/ssh-action@v1.2.2
         with:
           key: ${{ secrets.SSH_PRIVATE_KEY }}
