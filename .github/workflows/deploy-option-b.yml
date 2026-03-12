@@ -60,9 +60,9 @@ jobs:
       - name: 🚀 Deploy on VPS from GHCR
         uses: appleboy/ssh-action@v1.2.5
         with:
-          host: ${{ var.SSH_HOST }}
-          port: ${{ var.SSH_PORT }}
-          username: ${{ var.SSH_USERNAME }}
+          host: ${{ vars.SSH_HOST }}
+          port: ${{ vars.SSH_PORT }}
+          username: ${{ vars.SSH_USERNAME }}
           key: ${{ secrets.SSH_PRIVATE_KEY }}
           fingerprint: ${{ secrets.SSH_FINGERPRINT }}
           script: |
