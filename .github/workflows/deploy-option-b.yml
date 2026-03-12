@@ -73,7 +73,7 @@ jobs:
             COMPOSE_FILE="$APP_DIR/docker-compose.prod.yml"
             IMAGE_NAME="${{ steps.meta.outputs.image_name }}"
             IMAGE_TAG="${{ github.sha }}"
-            FULL_IMAGE="${IMAGE_TAG}"
+            FULL_IMAGE="${IMAGE_NAME}:${IMAGE_TAG}"
             GHCR_USERNAME="${{ secrets.GHCR_USERNAME }}"
             GHCR_READ_TOKEN="${{ secrets.GHCR_READ_TOKEN }}"
 
