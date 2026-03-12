@@ -8,7 +8,7 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Test SSH connection ${{ secrets.SSH_PRIVATE_KEY }}
+      - name: Test SSH connection
         uses: appleboy/ssh-action@v1.2.2
         with:
           key: ${{ secrets.SSH_PRIVATE_KEY }}
